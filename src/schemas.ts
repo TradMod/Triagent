@@ -115,3 +115,72 @@ export const RootCauseVerdict = z.object({
   confidence: z.number().min(0).max(100),
 });
 export type RootCauseVerdict = z.infer<typeof RootCauseVerdict>;
+
+// --- Deep triage stage (Phase 5) ---
+
+// SPEC §6.1 — full attacker-controlled execution path.
+export const AttackPathResult = z.object({
+  status: z.enum(["REACHABLE", "UNREACHABLE", "PARTIAL", "UNCERTAIN"]),
+  summary: z.string(),
+  attacker_capabilities: z.array(z.string()),
+  steps: z.array(z.string()), // ordered execution path
+  blockers: z.array(z.string()),
+  weakest_step: z.string(),
+  alternate_paths: z.array(z.string()),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type AttackPathResult = z.infer<typeof AttackPathResult>;
+
+// SPEC §6.2 — every condition required for exploitation, independently verified.
+export const Precondition = z.object({
+  condition: z.string(),
+  category: z.enum([
+    "explicit",
+    "implicit",
+    "attacker",
+    "victim",
+    "protocol_state",
+    "configuration",
+    "environmental",
+    "external",
+  ]),
+  status: z.enum(["SATISFIED", "UNSATISFIED", "CONDITIONAL", "UNKNOWN"]),
+});
+export const PreconditionsResult = z.object({
+  summary: z.string(),
+  conditions: z.array(Precondition),
+  blocking: z.array(z.string()), // preconditions that block exploitation
+  missing_from_report: z.array(z.string()), // preconditions the report omitted
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type PreconditionsResult = z.infer<typeof PreconditionsResult>;
+
+// SPEC §6.3 — analyze the PoC and map it to real production behavior.
+export const PocResult = z.object({
+  provided: z.boolean(),
+  status: z.enum(["WORKING", "BROKEN", "NOT_PROVIDED", "UNCERTAIN"]),
+  production_equivalent: z.enum(["YES", "NO", "PARTIAL", "UNKNOWN"]),
+  artificial_assumptions: z.array(z.string()), // mocks, impossible setup, test-only interfaces
+  demonstrated_impact: z.string(),
+  summary: z.string(),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type PocResult = z.infer<typeof PocResult>;
+
+// SPEC §7 — can the root cause produce a security-relevant exploit?
+export const ExploitabilityResult = z.object({
+  verdict: z.enum(["EXPLOITABLE", "NOT_EXPLOITABLE", "CONDITIONAL", "UNCERTAIN"]),
+  summary: z.string(),
+  reasoning: z.string(),
+  conditions: z.array(z.string()), // conditions attached to a CONDITIONAL verdict
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type ExploitabilityResult = z.infer<typeof ExploitabilityResult>;
