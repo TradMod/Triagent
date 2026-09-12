@@ -222,10 +222,12 @@ runAgent()      -> thread.run(input, TurnOptions) | thread.runStreamed(...)
 collectResult() -> turn.finalResponse (+ turn.items)
 ```
 
-Note: the SDK has **no cancel/abort for an in-flight `run()`** (openai/codex#5494).
-A timeout is enforced app-side by abandoning the promise — the underlying agent
-still runs to completion and bills. Gates therefore *avoid spawning* downstream
-work; they cannot stop already-running parallel agents.
+Note: `TurnOptions` accepts an `AbortSignal` (`{ signal }`), so an in-flight
+`run()` **can** be cancelled — a timeout is enforced app-side by aborting the
+turn, which stops the underlying agent (and its billing). Gates still *avoid
+spawning* unnecessary downstream work; where a parallel agent is already
+running and its result is no longer needed, the orchestrator can also abort it
+via its signal.
 
 Conceptual interface:
 
@@ -241,7 +243,7 @@ interface AgentRequest {
 }
 
 interface AgentResult<T> {
-  status: "completed" | "failed" | "timed_out";  // no native "needs_input"; use approvalPolicy
+  status: "completed" | "failed" | "timed_out";  // timed_out = turn aborted via AbortSignal
   output?: T;                   // absent on failure
   threadId: string;
 }

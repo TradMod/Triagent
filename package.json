@@ -1,0 +1,32 @@
+{
+  "name": "triagent",
+  "version": "1.0.0",
+  "description": "TRIAGENT",
+  "bin": {
+    "triagent": "src/cli.ts"
+  },
+  "scripts": {
+    "triage": "node src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TradMod/Triagent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/TradMod/Triagent/issues"
+  },
+  "homepage": "https://github.com/TradMod/Triagent#readme",
+  "dependencies": {
+    "@openai/codex-sdk": "^0.154.0",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "typescript": "^7.0.2"
+  }
+}

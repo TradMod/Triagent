@@ -79,12 +79,13 @@ Add:
 - structured output validation;
 - retries for malformed output;
 - basic execution status handling;
-- per-agent timeout (abandon the promise; the SDK has no in-flight cancel);
+- per-agent timeout (abort the turn via `TurnOptions.signal`);
 - bounded concurrency cap on parallel agents.
 
-The timeout and concurrency cap are dev-cost guardrails, not hardening: with no
-in-flight cancel and ~17 agents per run, a hung agent burns money with no stop
-button. Land them before running the pipeline repeatedly.
+The timeout and concurrency cap are dev-cost guardrails, not hardening: with
+~17 agents per run, a hung agent burns money. The SDK's `AbortSignal` gives a
+real stop button — wire the timeout to it. Land both before running the
+pipeline repeatedly.
 
 Statuses:
 
