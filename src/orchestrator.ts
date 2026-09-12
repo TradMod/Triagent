@@ -13,6 +13,8 @@ import {
   PreconditionsResult,
   PocResult,
   ExploitabilityResult,
+  ImpactResult,
+  LikelihoodResult,
   neutralReport,
 } from "./schemas.ts";
 import { spamStops, rootCauseStops, exploitabilityStops } from "./gates.ts";
@@ -198,5 +200,39 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
     status: "INFO",
     note: `passed (${exploitability.output?.verdict ?? exploitability.status})`,
   });
+
+  // --- Impact ‖ Likelihood (parallel, no gate; feed the final triager) ---
+  const assessCtx = {
+    report: neutral,
+    root_cause: judge.output ?? null,
+    attack_path: attackPath.output ?? null,
+    preconditions: preconditions.output ?? null,
+    poc: poc.output ?? null,
+    exploitability: exploitability.output ?? null,
+  };
+
+  const [impact, likelihood] = await Promise.all([
+    pool(() =>
+      runAgent({
+        role: "impact",
+        prompt: loadPrompt("impact"),
+        repoPath,
+        context: assessCtx,
+        schema: ImpactResult,
+      }),
+    ),
+    pool(() =>
+      runAgent({
+        role: "likelihood",
+        prompt: loadPrompt("likelihood"),
+        repoPath,
+        context: assessCtx,
+        schema: LikelihoodResult,
+      }),
+    ),
+  ]);
+  store.saveResult("impact", impact);
+  store.saveResult("likelihood", likelihood);
+
   return {};
 }

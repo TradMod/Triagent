@@ -184,3 +184,39 @@ export const ExploitabilityResult = z.object({
   confidence: z.number().min(0).max(100),
 });
 export type ExploitabilityResult = z.infer<typeof ExploitabilityResult>;
+
+// --- Impact & likelihood stage (Phase 6) ---
+
+// SPEC §8 — must separate three distinct impact concepts. Does NOT set severity.
+export const ImpactResult = z.object({
+  summary: z.string(),
+  demonstrated: z.string(), // what has been concretely proven
+  maximum_technical: z.string(), // max if all technically satisfiable conditions met
+  production_exposure: z.string(), // what is currently exposed on the deployed system
+  blast_radius: z.string(),
+  assets_affected: z.array(z.string()),
+  affected_scope: z.string(), // users / contracts / modules affected
+  production_deployed: z.enum(["YES", "NO", "UNKNOWN"]),
+  affected_version: z.string(),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type ImpactResult = z.infer<typeof ImpactResult>;
+
+// SPEC §9 — how realistically the validated exploit can occur. Does NOT set impact.
+export const LikelihoodResult = z.object({
+  summary: z.string(),
+  attacker_access: z.string(),
+  capital_requirement: z.string(),
+  timing_requirement: z.string(),
+  victim_interaction: z.string(),
+  external_conditions: z.array(z.string()),
+  repeatability: z.string(),
+  reliability: z.string(),
+  overall_likelihood: z.enum(["LOW", "MEDIUM", "HIGH"]),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type LikelihoodResult = z.infer<typeof LikelihoodResult>;
