@@ -36,8 +36,8 @@ const MAX_TARGETED = 3; // cap targeted follow-up investigators per run (cost gu
 
 // Per-agent model/effort. Single default here; any spawn() call may override
 // `model` / `modelReasoningEffort` (e.g. a cheaper model for intake/spam).
-const DEFAULT_MODEL = "gpt-5.4";
-const DEFAULT_EFFORT = "high" as const;
+const DEFAULT_MODEL = "gpt-5.5"; // gpt-5.4 is rejected on a ChatGPT-account Codex login
+const DEFAULT_EFFORT = "low" as const; // raise per-agent for the judges if quality drops
 const spawn = <T>(req: AgentRequest<T>): Promise<AgentResult<T>> =>
   runAgent({ model: DEFAULT_MODEL, modelReasoningEffort: DEFAULT_EFFORT, ...req });
 
@@ -91,7 +91,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // Normalized report is required to proceed; protocol context is best-effort.
   if (normalized.status !== "COMPLETED" || !normalized.output) {
     store.logEvent({ stage: "gate:normalize", status: "INFO", note: "normalization failed — cannot triage" });
-    finish(store, stopFinal("NEEDS_MORE_INFO", `Report normalization failed: ${normalized.error ?? "unknown"}`, { confidence: 20 }));
+    finish(store, stopFinal("NEEDS_MORE_INFO", `Report normalization failed: ${normalized.error ?? "unknown"}`, {}, { confidence: 20 }));
     return { stopped: "NORMALIZE_FAILED", reason: normalized.error };
   }
 
@@ -161,7 +161,15 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // an unavailable verdict (judge failed) continues rather than rejecting.
   if (judge.status === "COMPLETED" && judge.output && rootCauseStops(judge.output.verdict)) {
     store.logEvent({ stage: "gate:root_cause", status: "INFO", note: `rejected: ${judge.output.reasoning}` });
-    finish(store, stopFinal("INVALID", judge.output.reasoning, { confidence: judge.output.confidence }));
+    finish(
+      store,
+      stopFinal(
+        "INVALID",
+        judge.output.reasoning,
+        { validator: validator.output, intended: intended.output, judge: judge.output },
+        { confidence: judge.output.confidence },
+      ),
+    );
     return { stopped: "ROOT_CAUSE", reason: judge.output.reasoning };
   }
   store.logEvent({
@@ -225,7 +233,22 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // UNCERTAIN continue; a failed judge continues rather than rejecting.
   if (exploitability.status === "COMPLETED" && exploitability.output && exploitabilityStops(exploitability.output.verdict)) {
     store.logEvent({ stage: "gate:exploitability", status: "INFO", note: `rejected: ${exploitability.output.reasoning}` });
-    finish(store, stopFinal("INVALID", exploitability.output.reasoning, { confidence: exploitability.output.confidence }));
+    finish(
+      store,
+      stopFinal(
+        "INVALID",
+        exploitability.output.reasoning,
+        {
+          validator: validator.output,
+          intended: intended.output,
+          judge: judge.output,
+          attackPath: attackPath.output,
+          preconditions: preconditions.output,
+          poc: poc.output,
+        },
+        { confidence: exploitability.output.confidence },
+      ),
+    );
     return { stopped: "EXPLOITABILITY", reason: exploitability.output.reasoning };
   }
   store.logEvent({
@@ -336,7 +359,25 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
 
   if (decision.status !== "COMPLETED" || !decision.output) {
     // Triager itself failed — surface uncertainty rather than a fabricated verdict.
-    finish(store, stopFinal("NEEDS_MORE_INFO", `Main Triager failed: ${decision.error ?? "unknown"}`, { confidence: 20, priority: 3 }));
+    finish(
+      store,
+      stopFinal(
+        "NEEDS_MORE_INFO",
+        `Main Triager failed: ${decision.error ?? "unknown"}`,
+        {
+          validator: validator.output,
+          intended: intended.output,
+          judge: judge.output,
+          attackPath: attackPath.output,
+          preconditions: preconditions.output,
+          poc: poc.output,
+          impact: impact.output,
+          likelihood: likelihood.output,
+          contradiction: contradiction.output,
+        },
+        { confidence: 20, priority: 3 },
+      ),
+    );
     return {};
   }
 

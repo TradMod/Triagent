@@ -29,8 +29,13 @@ export class RunStore {
     this.dir = dir;
   }
 
-  static create(baseDir = resolve("runs")): RunStore {
-    const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+  // `label` (e.g. the report name) is prefixed to the run id so runs are easy to
+  // find and group; the timestamp + short uuid keep them unique and sortable.
+  static create(opts: { label?: string; baseDir?: string } = {}): RunStore {
+    const baseDir = opts.baseDir ?? resolve("runs");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const slug = opts.label ? opts.label.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 40) + "-" : "";
+    const runId = `${slug}${stamp}-${randomUUID().slice(0, 8)}`;
     const dir = resolve(baseDir, runId);
     for (const sub of ["input", "results", "logs"]) mkdirSync(join(dir, sub), { recursive: true });
     const store = new RunStore(runId, dir);

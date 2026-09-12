@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, basename, extname } from "node:path";
 import { triage } from "./orchestrator.ts";
 import { RunStore } from "./store.ts";
 import { FinalTriageResult } from "./schemas.ts";
@@ -11,10 +11,11 @@ function log(runId: string, msg: string) {
 }
 
 async function main(report: string, repo: string) {
+  const reportPath = resolve(report);
   const repoPath = resolve(repo);
-  const reportText = readFileSync(resolve(report), "utf8"); // throws if missing
+  const reportText = readFileSync(reportPath, "utf8"); // throws if missing
 
-  const store = RunStore.create();
+  const store = RunStore.create({ label: basename(reportPath, extname(reportPath)) });
   store.saveInput("report.md", reportText);
   log(store.runId, `repo=${repoPath}`);
   log(store.runId, "running gated pipeline → final triage...");

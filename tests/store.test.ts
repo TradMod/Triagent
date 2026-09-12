@@ -14,7 +14,7 @@ type T = z.infer<typeof Schema>;
 function main() {
   const base = mkdtempSync(join(tmpdir(), "triagent-store-"));
   try {
-    const store = RunStore.create(base);
+    const store = RunStore.create({ baseDir: base });
     store.saveInput("report.md", "# hello");
 
     // COMPLETED -> result file written and reloads validated.

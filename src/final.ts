@@ -92,11 +92,13 @@ export function buildFinal(
   };
 }
 
-// Minimal final.json for an early pipeline stop (reject / cannot-triage). No
-// Main Triager call — the stop reason is the decision.
+// final.json for an early pipeline stop (reject / cannot-triage). No Main Triager
+// call — the stop reason is the decision — but any specialist stages that already
+// ran are still folded in, so the UI shows the work done up to the stop.
 export function stopFinal(
   verdict: FinalTriageResult["verdict"],
   summary: string,
+  parts: SpecialistParts = {},
   opts: { confidence?: number; priority?: 1 | 2 | 3 | 4 | 5 } = {},
 ): FinalTriageResult {
   return buildFinal(
@@ -110,6 +112,6 @@ export function stopFinal(
       open_questions: [],
       key_evidence: [],
     },
-    {},
+    parts,
   );
 }
