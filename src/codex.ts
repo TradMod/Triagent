@@ -1,5 +1,13 @@
 import { Codex } from "@openai/codex-sdk";
-import type { Input, SandboxMode, ThreadOptions, TurnOptions, RunResult as Turn, Usage } from "@openai/codex-sdk";
+import type {
+  Input,
+  SandboxMode,
+  ThreadOptions,
+  TurnOptions,
+  RunResult as Turn,
+  Usage,
+  ModelReasoningEffort,
+} from "@openai/codex-sdk";
 import type { z } from "zod";
 import { z as zod } from "zod";
 
@@ -29,6 +37,7 @@ export interface AgentRequest<T> {
   context?: unknown;
   schema: z.ZodType<T>;
   model?: string;
+  modelReasoningEffort?: ModelReasoningEffort;
   sandboxMode?: SandboxMode; // default: read-only
   timeoutMs?: number; // total budget across retries; default 5min
   maxRetries?: number; // malformed-output retries; default 2
@@ -56,6 +65,7 @@ export async function runAgent<T>(req: AgentRequest<T>): Promise<AgentResult<T>>
     context,
     schema,
     model,
+    modelReasoningEffort,
     sandboxMode = "read-only",
     timeoutMs = 300_000,
     maxRetries = 2,
@@ -69,6 +79,7 @@ export async function runAgent<T>(req: AgentRequest<T>): Promise<AgentResult<T>>
     skipGitRepoCheck: true,
     approvalPolicy: "never",
     ...(model ? { model } : {}),
+    ...(modelReasoningEffort ? { modelReasoningEffort } : {}),
   });
 
   const timeout = AbortSignal.timeout(timeoutMs);

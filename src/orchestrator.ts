@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runAgent, limit } from "./codex.ts";
+import type { AgentRequest, AgentResult } from "./codex.ts";
 import type { RunStore } from "./store.ts";
 import {
   NormalizedReport,
@@ -33,6 +34,13 @@ const loadPrompt = (name: string) => readFileSync(join(PROMPTS_DIR, `${name}.md`
 const CONCURRENCY = 4;
 const MAX_TARGETED = 3; // cap targeted follow-up investigators per run (cost guard)
 
+// Per-agent model/effort. Single default here; any spawn() call may override
+// `model` / `modelReasoningEffort` (e.g. a cheaper model for intake/spam).
+const DEFAULT_MODEL = "gpt-5.4";
+const DEFAULT_EFFORT = "high" as const;
+const spawn = <T>(req: AgentRequest<T>): Promise<AgentResult<T>> =>
+  runAgent({ model: DEFAULT_MODEL, modelReasoningEffort: DEFAULT_EFFORT, ...req });
+
 export interface TriageOutcome {
   stopped?: "NORMALIZE_FAILED" | "SPAM" | "ROOT_CAUSE" | "EXPLOITABILITY";
   reason?: string;
@@ -59,7 +67,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // Independent intake agents run in parallel from the raw report.
   const [protocol, normalized] = await Promise.all([
     pool(() =>
-      runAgent({
+      spawn({
         role: "protocol_context",
         prompt: loadPrompt("protocol_context"),
         repoPath,
@@ -68,7 +76,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
       }),
     ),
     pool(() =>
-      runAgent({
+      spawn({
         role: "normalize_report",
         prompt: loadPrompt("normalize_report"),
         repoPath,
@@ -88,7 +96,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   }
 
   // Spam checker sees the neutral report (no reporter severity) + protocol context.
-  const spam = await runAgent({
+  const spam = await spawn({
     role: "spam_checker",
     prompt: loadPrompt("spam_checker"),
     repoPath,
@@ -115,7 +123,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
 
   const [validator, intended] = await Promise.all([
     pool(() =>
-      runAgent({
+      spawn({
         role: "root_cause_validator",
         prompt: loadPrompt("root_cause_validator"),
         repoPath,
@@ -124,7 +132,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
       }),
     ),
     pool(() =>
-      runAgent({
+      spawn({
         role: "intended_behavior",
         prompt: loadPrompt("intended_behavior"),
         repoPath,
@@ -136,7 +144,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   store.saveResult("root_cause_validator", validator);
   store.saveResult("intended_behavior", intended);
 
-  const judge = await runAgent({
+  const judge = await spawn({
     role: "root_cause_judge",
     prompt: loadPrompt("root_cause_judge"),
     repoPath,
@@ -167,7 +175,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
 
   const [attackPath, preconditions, poc] = await Promise.all([
     pool(() =>
-      runAgent({
+      spawn({
         role: "attack_path",
         prompt: loadPrompt("attack_path"),
         repoPath,
@@ -176,7 +184,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
       }),
     ),
     pool(() =>
-      runAgent({
+      spawn({
         role: "preconditions",
         prompt: loadPrompt("preconditions"),
         repoPath,
@@ -185,7 +193,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
       }),
     ),
     pool(() =>
-      runAgent({
+      spawn({
         role: "poc_reproduction",
         prompt: loadPrompt("poc_reproduction"),
         repoPath,
@@ -198,7 +206,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   store.saveResult("preconditions", preconditions);
   store.saveResult("poc", poc);
 
-  const exploitability = await runAgent({
+  const exploitability = await spawn({
     role: "exploitability_judge",
     prompt: loadPrompt("exploitability_judge"),
     repoPath,
@@ -238,7 +246,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
 
   const [impact, likelihood] = await Promise.all([
     pool(() =>
-      runAgent({
+      spawn({
         role: "impact",
         prompt: loadPrompt("impact"),
         repoPath,
@@ -247,7 +255,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
       }),
     ),
     pool(() =>
-      runAgent({
+      spawn({
         role: "likelihood",
         prompt: loadPrompt("likelihood"),
         repoPath,
@@ -271,7 +279,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
     likelihood: likelihood.output ?? null,
   };
 
-  const contradiction = await runAgent({
+  const contradiction = await spawn({
     role: "contradiction_reviewer",
     prompt: loadPrompt("contradiction_reviewer"),
     repoPath,
@@ -285,7 +293,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   const targeted = await Promise.all(
     questions.map((question, i) =>
       pool(async () => {
-        const res = await runAgent({
+        const res = await spawn({
           role: "targeted_investigator",
           prompt: loadPrompt("targeted_investigator"),
           repoPath,
@@ -298,7 +306,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
     ),
   );
 
-  const audit = await runAgent({
+  const audit = await spawn({
     role: "evidence_auditor",
     prompt: loadPrompt("evidence_auditor"),
     repoPath,
@@ -312,7 +320,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   store.saveResult("evidence_audit", audit);
 
   // --- Main Triager: synthesize the final decision (Phase 8) ---
-  const decision = await runAgent({
+  const decision = await spawn({
     role: "main_triager",
     prompt: loadPrompt("main_triager"),
     repoPath,
@@ -335,7 +343,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // --- Mitigation: only for valid findings (Phase 9) ---
   let mitigation: MitigationResult | undefined;
   if (isValidFinding(decision.output.verdict)) {
-    const mit = await runAgent({
+    const mit = await spawn({
       role: "mitigation",
       prompt: loadPrompt("mitigation"),
       repoPath,
