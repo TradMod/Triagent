@@ -15,22 +15,42 @@ import {
   ExploitabilityResult,
   ImpactResult,
   LikelihoodResult,
+  ContradictionResult,
+  TargetedResult,
+  EvidenceAuditResult,
+  MainTriageDecision,
+  FinalTriageResult,
   neutralReport,
 } from "./schemas.ts";
 import { spamStops, rootCauseStops, exploitabilityStops } from "./gates.ts";
+import { buildFinal, stopFinal } from "./final.ts";
 
 const PROMPTS_DIR = join(import.meta.dirname, "..", "prompts");
 const loadPrompt = (name: string) => readFileSync(join(PROMPTS_DIR, `${name}.md`), "utf8");
 
-// ponytail: fixed cap; expose per-run config when eval shows it matters.
+// ponytail: fixed caps; expose per-run config when eval shows it matters.
 const CONCURRENCY = 4;
+const MAX_TARGETED = 3; // cap targeted follow-up investigators per run (cost guard)
 
 export interface TriageOutcome {
   stopped?: "NORMALIZE_FAILED" | "SPAM" | "ROOT_CAUSE" | "EXPLOITABILITY";
   reason?: string;
 }
 
-// Phase 3: intake (Protocol Context ‖ Report Normalizer) → Spam gate.
+// Validate and persist final.json. Every run ends here — including early stops.
+function finish(store: RunStore, final: FinalTriageResult): void {
+  const validated = FinalTriageResult.parse(final);
+  store.saveJson("final", validated);
+  store.logEvent({
+    stage: "final",
+    status: "INFO",
+    note: `${validated.verdict} / ${validated.severity} / conf ${validated.confidence} / prio ${validated.priority}`,
+  });
+}
+
+// Full gated pipeline: intake → spam → root cause → deep triage →
+// exploitability → impact/likelihood → contradiction/evidence review → Main
+// Triager. Always produces final.json.
 // Later phases extend this past the gate.
 export async function triage(store: RunStore, rawReport: string, repoPath: string): Promise<TriageOutcome> {
   const pool = limit(CONCURRENCY);
@@ -62,6 +82,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // Normalized report is required to proceed; protocol context is best-effort.
   if (normalized.status !== "COMPLETED" || !normalized.output) {
     store.logEvent({ stage: "gate:normalize", status: "INFO", note: "normalization failed — cannot triage" });
+    finish(store, stopFinal("NEEDS_MORE_INFO", `Report normalization failed: ${normalized.error ?? "unknown"}`, { confidence: 20 }));
     return { stopped: "NORMALIZE_FAILED", reason: normalized.error };
   }
 
@@ -81,6 +102,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // Gate 1 — only a confident FAIL stops; UNCERTAIN and PASS continue.
   if (spam.status === "COMPLETED" && spam.output && spamStops(spam.output.verdict)) {
     store.logEvent({ stage: "gate:spam", status: "INFO", note: `rejected: ${spam.output.reasoning}` });
+    finish(store, stopFinal("INVALID", spam.output.reasoning));
     return { stopped: "SPAM", reason: spam.output.reasoning };
   }
 
@@ -130,6 +152,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // an unavailable verdict (judge failed) continues rather than rejecting.
   if (judge.status === "COMPLETED" && judge.output && rootCauseStops(judge.output.verdict)) {
     store.logEvent({ stage: "gate:root_cause", status: "INFO", note: `rejected: ${judge.output.reasoning}` });
+    finish(store, stopFinal("INVALID", judge.output.reasoning, { confidence: judge.output.confidence }));
     return { stopped: "ROOT_CAUSE", reason: judge.output.reasoning };
   }
   store.logEvent({
@@ -193,6 +216,7 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   // UNCERTAIN continue; a failed judge continues rather than rejecting.
   if (exploitability.status === "COMPLETED" && exploitability.output && exploitabilityStops(exploitability.output.verdict)) {
     store.logEvent({ stage: "gate:exploitability", status: "INFO", note: `rejected: ${exploitability.output.reasoning}` });
+    finish(store, stopFinal("INVALID", exploitability.output.reasoning, { confidence: exploitability.output.confidence }));
     return { stopped: "EXPLOITABILITY", reason: exploitability.output.reasoning };
   }
   store.logEvent({
@@ -234,5 +258,91 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   store.saveResult("impact", impact);
   store.saveResult("likelihood", likelihood);
 
+  // --- Contradiction review → targeted investigations → evidence audit (Phase 7) ---
+  const specialists = {
+    report: neutral,
+    root_cause: judge.output ?? null,
+    attack_path: attackPath.output ?? null,
+    preconditions: preconditions.output ?? null,
+    poc: poc.output ?? null,
+    exploitability: exploitability.output ?? null,
+    impact: impact.output ?? null,
+    likelihood: likelihood.output ?? null,
+  };
+
+  const contradiction = await runAgent({
+    role: "contradiction_reviewer",
+    prompt: loadPrompt("contradiction_reviewer"),
+    repoPath,
+    context: specialists,
+    schema: ContradictionResult,
+  });
+  store.saveResult("contradictions", contradiction);
+
+  // Dynamically spawn a targeted investigator per recommended narrow question (capped).
+  const questions = (contradiction.output?.recommended_investigations ?? []).slice(0, MAX_TARGETED);
+  const targeted = await Promise.all(
+    questions.map((question, i) =>
+      pool(async () => {
+        const res = await runAgent({
+          role: "targeted_investigator",
+          prompt: loadPrompt("targeted_investigator"),
+          repoPath,
+          context: { question, report: neutral, protocol: protocolCtx },
+          schema: TargetedResult,
+        });
+        store.saveResult(`targeted_${i + 1}`, res);
+        return res;
+      }),
+    ),
+  );
+
+  const audit = await runAgent({
+    role: "evidence_auditor",
+    prompt: loadPrompt("evidence_auditor"),
+    repoPath,
+    context: {
+      ...specialists,
+      contradictions: contradiction.output ?? null,
+      targeted_investigations: targeted.map((t) => t.output ?? null),
+    },
+    schema: EvidenceAuditResult,
+  });
+  store.saveResult("evidence_audit", audit);
+
+  // --- Main Triager: synthesize the final decision (Phase 8) ---
+  const decision = await runAgent({
+    role: "main_triager",
+    prompt: loadPrompt("main_triager"),
+    repoPath,
+    context: {
+      ...specialists,
+      contradictions: contradiction.output ?? null,
+      targeted_investigations: targeted.map((t) => t.output ?? null),
+      evidence_audit: audit.output ?? null,
+    },
+    schema: MainTriageDecision,
+  });
+  store.saveResult("main_triage_decision", decision);
+
+  if (decision.status !== "COMPLETED" || !decision.output) {
+    // Triager itself failed — surface uncertainty rather than a fabricated verdict.
+    finish(store, stopFinal("NEEDS_MORE_INFO", `Main Triager failed: ${decision.error ?? "unknown"}`, { confidence: 20, priority: 3 }));
+    return {};
+  }
+
+  // Deterministically assemble final.json from the decision + specialist outputs.
+  const final = buildFinal(decision.output, {
+    validator: validator.output,
+    intended: intended.output,
+    judge: judge.output,
+    attackPath: attackPath.output,
+    preconditions: preconditions.output,
+    poc: poc.output,
+    impact: impact.output,
+    likelihood: likelihood.output,
+    contradiction: contradiction.output,
+  });
+  finish(store, final);
   return {};
 }

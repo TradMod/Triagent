@@ -69,6 +69,11 @@ export class RunStore {
     return schema.parse(JSON.parse(readFileSync(this.resultPath(name), "utf8")));
   }
 
+  // Write an already-assembled/validated object (e.g. final.json) that is not an AgentResult.
+  saveJson(name: string, data: unknown): void {
+    writeFileSync(this.resultPath(name), JSON.stringify(data, null, 2));
+  }
+
   has(name: string): boolean {
     return existsSync(this.resultPath(name));
   }

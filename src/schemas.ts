@@ -220,3 +220,138 @@ export const LikelihoodResult = z.object({
   confidence: z.number().min(0).max(100),
 });
 export type LikelihoodResult = z.infer<typeof LikelihoodResult>;
+
+// --- Contradiction & evidence review stage (Phase 7) ---
+
+// SPEC §10 — disagreement between specialist agents.
+export const Contradiction = z.object({
+  description: z.string(),
+  agents: z.array(z.string()), // which specialists disagree
+});
+export const ContradictionResult = z.object({
+  summary: z.string(),
+  contradictions: z.array(Contradiction),
+  unsupported_conclusions: z.array(z.string()),
+  unresolved_questions: z.array(z.string()),
+  recommended_investigations: z.array(z.string()), // narrow questions for targeted investigators
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type ContradictionResult = z.infer<typeof ContradictionResult>;
+
+// SPEC §12 — one narrow follow-up question, answered from code/tests only.
+export const TargetedResult = z.object({
+  question: z.string(),
+  answer: z.string(),
+  verdict: z.enum(["RESOLVED", "PARTIALLY_RESOLVED", "UNRESOLVED"]),
+  summary: z.string(),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type TargetedResult = z.infer<typeof TargetedResult>;
+
+// SPEC §11 — ensure material conclusions are evidence-backed. Does NOT set severity.
+export const AuditedClaim = z.object({
+  claim: z.string(),
+  supported: z.enum(["YES", "NO", "PARTIAL"]),
+  issue: z.string(), // "" when supported
+});
+export const EvidenceFlag = z.object({
+  type: z.enum([
+    "unsupported_assertion",
+    "hallucinated_behavior",
+    "missing_code_reference",
+    "weak_inference",
+    "report_wording_only",
+  ]),
+  detail: z.string(),
+});
+export const EvidenceAuditResult = z.object({
+  summary: z.string(),
+  overall: z.enum(["SOUND", "WEAK", "UNSOUND"]),
+  audited_claims: z.array(AuditedClaim),
+  flags: z.array(EvidenceFlag),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type EvidenceAuditResult = z.infer<typeof EvidenceAuditResult>;
+
+// --- Final decision (Phase 8) ---
+
+// SPEC §13 — the Main Triager's synthesis. It decides ONLY these; the full
+// final.json is assembled deterministically from specialist outputs (§4.1:
+// it must not blindly redo specialist analysis). Reporter severity is never
+// shown to it, so severity is determined independently.
+export const MainTriageDecision = z.object({
+  verdict: z.enum(["VALID", "INVALID", "PARTIALLY_VALID", "NEEDS_MORE_INFO"]),
+  severity: z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"]),
+  confidence: z.number().min(0).max(100),
+  priority: z.number().int().min(1).max(5),
+  summary: z.string(),
+  reasoning: z.string(),
+  open_questions: z.array(z.string()),
+  key_evidence: z.array(Evidence),
+});
+export type MainTriageDecision = z.infer<typeof MainTriageDecision>;
+
+// SPEC §14 — the assembled final output written to final.json. This is our own
+// output contract (not an agent outputSchema), so .nullable() here is for data,
+// not strict-mode.
+export const FinalTriageResult = z.object({
+  verdict: MainTriageDecision.shape.verdict,
+  severity: MainTriageDecision.shape.severity,
+  confidence: z.number().min(0).max(100),
+  priority: z.number().int().min(1).max(5),
+  summary: z.string(),
+  root_cause: z.object({
+    verdict: z.string(),
+    description: z.string(),
+    affected_code: z.array(z.string()),
+    intended_behavior: z.string(),
+    evidence: z.array(Evidence),
+  }),
+  attack_path: z.object({
+    status: z.string(),
+    steps: z.array(z.string()),
+    blockers: z.array(z.string()),
+    alternate_paths: z.array(z.string()),
+  }),
+  preconditions: z.object({
+    required: z.array(z.string()),
+    blocking: z.array(z.string()),
+    missing_from_report: z.array(z.string()),
+  }),
+  poc: z.object({
+    provided: z.boolean(),
+    production_equivalent: z.string(),
+    artificial_assumptions: z.array(z.string()),
+    demonstrated_impact: z.string(),
+  }),
+  impact: z.object({
+    demonstrated: z.string(),
+    maximum_technical: z.string(),
+    production_exposure: z.string(),
+    blast_radius: z.string(),
+  }),
+  likelihood: z.object({
+    rating: z.string(),
+    reasoning: z.string(),
+  }),
+  production_status: z.object({
+    affected: z.boolean().nullable(),
+    version: z.string(),
+    configuration: z.string(),
+    evidence: z.array(Evidence),
+  }),
+  contradictions: z.array(z.string()),
+  mitigation: z.object({
+    immediate: z.string(),
+    long_term: z.array(z.string()),
+  }),
+  open_questions: z.array(z.string()),
+  evidence: z.array(Evidence),
+});
+export type FinalTriageResult = z.infer<typeof FinalTriageResult>;
