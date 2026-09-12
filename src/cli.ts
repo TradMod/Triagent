@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { randomUUID } from "node:crypto";
-import { readFileSync, mkdirSync, writeFileSync, copyFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { runAgent } from "./codex.ts";
+import { RunStore } from "./store.ts";
 
 // Smoke schema: proves an agent can read the repo, run a command, and return
 // validated JSON. Real triage schemas arrive with the agents in later phases.
@@ -24,14 +24,11 @@ async function triage(report: string, repo: string) {
   const repoPath = resolve(repo);
   const reportText = readFileSync(reportPath, "utf8"); // throws if missing
 
-  const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
-  const runDir = resolve("runs", runId);
-  mkdirSync(resolve(runDir, "input"), { recursive: true });
-  mkdirSync(resolve(runDir, "results"), { recursive: true });
-  copyFileSync(reportPath, resolve(runDir, "input", "report.md"));
+  const store = RunStore.create();
+  store.saveInput("report.md", reportText);
 
-  log(runId, `report=${reportPath} repo=${repoPath}`);
-  log(runId, "starting Codex smoke agent (read-only)...");
+  log(store.runId, `report=${reportPath} repo=${repoPath}`);
+  log(store.runId, "starting Codex smoke agent (read-only)...");
 
   const res = await runAgent({
     role: "smoke",
@@ -42,16 +39,17 @@ async function triage(report: string, repo: string) {
     repoPath,
     schema: SmokeSchema,
   });
+  store.saveResult("smoke", res);
 
   if (res.status !== "COMPLETED") {
     throw new Error(`smoke agent ${res.status}: ${res.error}`);
   }
-  writeFileSync(resolve(runDir, "results", "smoke.json"), JSON.stringify(res.output, null, 2));
 
-  log(runId, `thread=${res.threadId} status=${res.status} usage=${JSON.stringify(res.usage)}`);
-  log(runId, `result: ${JSON.stringify(res.output)}`);
-  log(runId, `saved -> ${runDir}`);
-  void reportText; // report is copied, not yet analyzed (real intake lands in Phase 3)
+  // Inspection: reload the persisted result independently of the run.
+  const loaded = store.loadResult("smoke", SmokeSchema);
+  log(store.runId, `thread=${res.threadId} status=${res.status} usage=${JSON.stringify(res.usage)}`);
+  log(store.runId, `reloaded: ${JSON.stringify(loaded)}`);
+  log(store.runId, `saved -> ${store.dir}`);
 }
 
 const { values, positionals } = parseArgs({
