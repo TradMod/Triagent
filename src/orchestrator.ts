@@ -19,10 +19,11 @@ import {
   TargetedResult,
   EvidenceAuditResult,
   MainTriageDecision,
+  MitigationResult,
   FinalTriageResult,
   neutralReport,
 } from "./schemas.ts";
-import { spamStops, rootCauseStops, exploitabilityStops } from "./gates.ts";
+import { spamStops, rootCauseStops, exploitabilityStops, isValidFinding } from "./gates.ts";
 import { buildFinal, stopFinal } from "./final.ts";
 
 const PROMPTS_DIR = join(import.meta.dirname, "..", "prompts");
@@ -331,18 +332,42 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
     return {};
   }
 
+  // --- Mitigation: only for valid findings (Phase 9) ---
+  let mitigation: MitigationResult | undefined;
+  if (isValidFinding(decision.output.verdict)) {
+    const mit = await runAgent({
+      role: "mitigation",
+      prompt: loadPrompt("mitigation"),
+      repoPath,
+      context: {
+        report: neutral,
+        root_cause: judge.output ?? null,
+        affected_code: validator.output?.affected_code ?? [],
+        impact: impact.output ?? null,
+        exploitability: exploitability.output ?? null,
+      },
+      schema: MitigationResult,
+    });
+    store.saveResult("mitigation", mit);
+    mitigation = mit.output;
+  }
+
   // Deterministically assemble final.json from the decision + specialist outputs.
-  const final = buildFinal(decision.output, {
-    validator: validator.output,
-    intended: intended.output,
-    judge: judge.output,
-    attackPath: attackPath.output,
-    preconditions: preconditions.output,
-    poc: poc.output,
-    impact: impact.output,
-    likelihood: likelihood.output,
-    contradiction: contradiction.output,
-  });
+  const final = buildFinal(
+    decision.output,
+    {
+      validator: validator.output,
+      intended: intended.output,
+      judge: judge.output,
+      attackPath: attackPath.output,
+      preconditions: preconditions.output,
+      poc: poc.output,
+      impact: impact.output,
+      likelihood: likelihood.output,
+      contradiction: contradiction.output,
+    },
+    mitigation,
+  );
   finish(store, final);
   return {};
 }

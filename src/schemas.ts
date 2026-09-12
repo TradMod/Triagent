@@ -297,6 +297,18 @@ export const MainTriageDecision = z.object({
 });
 export type MainTriageDecision = z.infer<typeof MainTriageDecision>;
 
+// SPEC §12 — remediation for a valid finding. Targets the validated root cause,
+// not just the submitted PoC. Runs only for VALID / PARTIALLY_VALID findings.
+export const MitigationResult = z.object({
+  summary: z.string(),
+  immediate: z.string(), // minimal safe change addressing the root cause
+  long_term: z.array(z.string()), // tests, fuzzing, permission model, monitoring, etc.
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type MitigationResult = z.infer<typeof MitigationResult>;
+
 // SPEC §14 — the assembled final output written to final.json. This is our own
 // output contract (not an agent outputSchema), so .nullable() here is for data,
 // not strict-mode.

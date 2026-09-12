@@ -10,6 +10,7 @@ import type {
   ImpactResult,
   LikelihoodResult,
   ContradictionResult,
+  MitigationResult,
 } from "./schemas.ts";
 
 // Deterministic assembly of final.json from the Main Triager's decision plus the
@@ -30,7 +31,11 @@ export interface SpecialistParts {
 const deployed = (v: ImpactResult["production_deployed"] | undefined): boolean | null =>
   v === "YES" ? true : v === "NO" ? false : null;
 
-export function buildFinal(decision: MainTriageDecision, p: SpecialistParts): FinalTriageResult {
+export function buildFinal(
+  decision: MainTriageDecision,
+  p: SpecialistParts,
+  mitigation?: MitigationResult,
+): FinalTriageResult {
   return {
     verdict: decision.verdict,
     severity: decision.severity,
@@ -78,7 +83,10 @@ export function buildFinal(decision: MainTriageDecision, p: SpecialistParts): Fi
       evidence: p.impact?.evidence ?? [],
     },
     contradictions: (p.contradiction?.contradictions ?? []).map((c) => c.description),
-    mitigation: { immediate: "", long_term: [] }, // filled by Phase 9 for valid findings
+    mitigation: {
+      immediate: mitigation?.immediate ?? "", // present only for valid findings
+      long_term: mitigation?.long_term ?? [],
+    },
     open_questions: decision.open_questions,
     evidence: decision.key_evidence,
   };
