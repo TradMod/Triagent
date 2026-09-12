@@ -3,14 +3,16 @@ import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 import { readFileSync, mkdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { Codex } from "@openai/codex-sdk";
 import { z } from "zod";
+import { runAgent } from "./codex.ts";
 
-// Phase 0 smoke schema: proves an agent can read the repo and return validated JSON.
-// Real triage schemas arrive with the agents in later phases.
+// Smoke schema: proves an agent can read the repo, run a command, and return
+// validated JSON. Real triage schemas arrive with the agents in later phases.
 const SmokeSchema = z.object({
   summary: z.string(),
   primary_languages: z.array(z.string()),
+  command_run: z.string(),
+  file_count: z.number(),
 });
 
 function log(runId: string, msg: string) {
@@ -31,26 +33,25 @@ async function triage(report: string, repo: string) {
   log(runId, `report=${reportPath} repo=${repoPath}`);
   log(runId, "starting Codex smoke agent (read-only)...");
 
-  const codex = new Codex(); // auth from ~/.codex/auth.json
-  const thread = codex.startThread({
-    workingDirectory: repoPath,
-    sandboxMode: "read-only",
-    skipGitRepoCheck: true,
-    approvalPolicy: "never",
+  const res = await runAgent({
+    role: "smoke",
+    prompt:
+      "Inspect this repository. Run a shell command to count its source files, " +
+      "then return: a one-sentence summary, the primary programming languages, " +
+      "the exact command you ran, and the resulting file count.",
+    repoPath,
+    schema: SmokeSchema,
   });
 
-  const turn = await thread.run(
-    "Inspect this repository. Return a one-sentence summary of what it is and its primary programming languages.",
-    { outputSchema: z.toJSONSchema(SmokeSchema) },
-  );
+  if (res.status !== "COMPLETED") {
+    throw new Error(`smoke agent ${res.status}: ${res.error}`);
+  }
+  writeFileSync(resolve(runDir, "results", "smoke.json"), JSON.stringify(res.output, null, 2));
 
-  const result = SmokeSchema.parse(JSON.parse(turn.finalResponse));
-  writeFileSync(resolve(runDir, "results", "smoke.json"), JSON.stringify(result, null, 2));
-
-  log(runId, `thread=${thread.id} usage=${JSON.stringify(turn.usage)}`);
-  log(runId, `result: ${JSON.stringify(result)}`);
+  log(runId, `thread=${res.threadId} status=${res.status} usage=${JSON.stringify(res.usage)}`);
+  log(runId, `result: ${JSON.stringify(res.output)}`);
   log(runId, `saved -> ${runDir}`);
-  void reportText; // Phase 0: report is copied, not yet analyzed
+  void reportText; // report is copied, not yet analyzed (real intake lands in Phase 3)
 }
 
 const { values, positionals } = parseArgs({
