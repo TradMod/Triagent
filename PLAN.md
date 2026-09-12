@@ -14,6 +14,57 @@ Keep V1 simple. Do not add custom RAG, embeddings, databases, or RL until evalua
 
 ---
 
+# Hackathon Development Rule
+
+**Priority: reach a working end-to-end V1 as fast as possible.** Do not spend
+significant time on builds, exhaustive tests, test infrastructure, or hardening
+unless they are required to make the core pipeline work.
+
+- Do **not** run the full test suite after every change.
+- Do **not** repeatedly run full builds just for verification.
+- Do **not** create extensive unit/integration tests during initial implementation.
+- Do **not** test trivial plumbing that can be verified by inspection.
+- **Batch** implementation changes before running any validation.
+- Prefer a **minimal smoke test of the exact feature** being implemented.
+- If a test/build is slow and not required to unblock development, **skip it and continue**.
+
+When implementing from this plan, do not automatically run expensive
+builds/tests after every task — only when needed to verify functionality or when
+explicitly requested.
+
+**Testing during Phases 0–9** is limited to what proves the current feature
+works, e.g.: a Codex thread can spawn; an agent can access the repo; structured
+output parses; a gate routes correctly; parallel agents return results; one real
+report can complete the pipeline.
+
+**Do not remove existing tests or compromise the architecture.** The current
+offline checks (`tests/*.test.ts`) stay. All deferred testing and hardening is
+marked **[post-hackathon]** below.
+
+## Hackathon Milestone (definition of done)
+
+```text
+report + repo
+   ->
+Codex specialist agents
+   ->
+gated triage pipeline
+   ->
+Main Triager
+   ->
+final.json
+```
+
+## Pre-Demo Checklist
+
+Before the final demo, run only:
+
+1. one end-to-end smoke test on a known-good report;
+2. fix demo-blocking failures;
+3. optionally, one invalid report if time permits.
+
+---
+
 # Phase 0 — Project Skeleton
 
 ## Build
@@ -239,7 +290,8 @@ A root-cause verdict backed by code and intended-behavior evidence.
 
 ## Exit Criteria
 
-TriAgent can correctly distinguish:
+On **one real report**, the Root Cause Judge returns a code-backed verdict that
+correctly distinguishes:
 
 ```text
 real implementation defect
@@ -249,7 +301,7 @@ vs
 unsupported report claim
 ```
 
-on a small curated test set.
+[post-hackathon] Validate against a small curated test set.
 
 ---
 
@@ -288,13 +340,10 @@ TriAgent can determine whether a validated root cause can actually produce a sec
 
 ## Exit Criteria
 
-For test findings, the system can identify:
-
-- unreachable paths;
-- hidden blockers;
-- unrealistic PoCs;
-- missing preconditions;
-- production-feasible paths.
+The three deep-triage agents run in parallel and the Exploitability Judge
+returns a verdict on **one real report**. It should be able to surface at least
+one of: unreachable paths, hidden blockers, unrealistic PoCs, missing
+preconditions, or a production-feasible path.
 
 ---
 
@@ -456,7 +505,11 @@ Valid findings receive technically relevant remediation guidance without affecti
 
 ---
 
-# Phase 10 — Evaluation Harness
+# Phase 10 — Evaluation Harness  **[post-hackathon]**
+
+> **Deferred.** Do not build the full evaluation harness for the hackathon
+> milestone. Ship the end-to-end pipeline (Phases 0–9) first; do this only if
+> there is extra time after a working demo.
 
 Before expanding features, build a real evaluation corpus.
 
@@ -503,7 +556,10 @@ Changes to prompts or architecture can be measured against a stable baseline.
 
 ---
 
-# Phase 11 — Prompt Refinement
+# Phase 11 — Prompt Refinement  **[post-hackathon]**
+
+> Depends on the deferred eval harness (Phase 10). During the hackathon, refine
+> a prompt only when it blocks the demo pipeline; systematic refinement waits.
 
 Use evaluation failures to manually improve prompts.
 
@@ -543,7 +599,10 @@ Prompt changes show measurable improvement on the evaluation corpus.
 
 ---
 
-# Phase 12 — V1 Hardening
+# Phase 12 — V1 Hardening  **[post-hackathon]**
+
+> Not part of the hackathon milestone. Add only what evaluation shows is
+> necessary, after a working demo exists.
 
 Add only what evaluation shows is necessary.
 
@@ -600,6 +659,7 @@ duplicate / known-issue detection
 # Recommended Build Order
 
 ```text
+=== HACKATHON MILESTONE (end-to-end final.json) ===
 0. Project Skeleton
 1. Codex Runtime
 2. State + Persistence
@@ -610,6 +670,7 @@ duplicate / known-issue detection
 7. Contradiction + Evidence Review
 8. Final Triager
 9. Mitigation
+=== POST-HACKATHON ===
 10. Evaluation Harness
 11. Prompt Refinement
 12. V1 Hardening
@@ -617,4 +678,6 @@ duplicate / known-issue detection
 
 Primary rule:
 
-> Build the smallest complete triage loop first, then improve accuracy using evaluations rather than adding infrastructure speculatively.
+> Build the smallest complete triage loop first (Phases 0–9), reach a working
+> demo, then improve accuracy using evaluations rather than adding
+> infrastructure speculatively.
