@@ -16,14 +16,14 @@ async function main(report: string, repo: string) {
   const store = RunStore.create();
   store.saveInput("report.md", reportText);
   log(store.runId, `repo=${repoPath}`);
-  log(store.runId, "running intake (protocol context ‖ normalize) → spam gate...");
+  log(store.runId, "running intake → spam gate → root cause stage...");
 
   const outcome = await triage(store, reportText, repoPath);
 
   if (outcome.stopped) {
     log(store.runId, `STOPPED [${outcome.stopped}]: ${outcome.reason ?? ""}`);
   } else {
-    log(store.runId, "intake passed — continuing (downstream stages land in later phases)");
+    log(store.runId, "root cause passed — continuing (deep triage lands in later phases)");
   }
   log(store.runId, `run -> ${store.dir}`);
 }

@@ -78,3 +78,40 @@ export const SpamResult = z.object({
   evidence: z.array(Evidence),
 });
 export type SpamResult = z.infer<typeof SpamResult>;
+
+// --- Root cause stage (Phase 4) ---
+
+// SPEC §5.1 — independently verify whether the claimed faulty behavior exists.
+export const RootCauseResult = z.object({
+  verdict: z.enum(["VALID", "INVALID", "UNCERTAIN"]),
+  summary: z.string(),
+  affected_code: z.array(z.string()), // file:symbol:line
+  reasoning: z.string(),
+  contradicting_protections: z.array(z.string()), // guards that falsify the claim
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type RootCauseResult = z.infer<typeof RootCauseResult>;
+
+// SPEC §5.2 — determine what the system is intended to do, independently.
+export const IntendedBehaviorResult = z.object({
+  intended_behavior: z.string(),
+  deviates_from_intent: z.enum(["YES", "NO", "UNCLEAR"]),
+  summary: z.string(),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type IntendedBehaviorResult = z.infer<typeof IntendedBehaviorResult>;
+
+// SPEC §5.3 — is there a genuine security-relevant root cause?
+export const RootCauseVerdict = z.object({
+  verdict: z.enum(["VALID", "INVALID", "UNCERTAIN"]),
+  summary: z.string(),
+  reasoning: z.string(),
+  evidence: z.array(Evidence),
+  unknowns: z.array(z.string()),
+  confidence: z.number().min(0).max(100),
+});
+export type RootCauseVerdict = z.infer<typeof RootCauseVerdict>;

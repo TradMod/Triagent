@@ -2,7 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runAgent, limit } from "./codex.ts";
 import type { RunStore } from "./store.ts";
-import { NormalizedReport, ProtocolContext, SpamResult, neutralReport } from "./schemas.ts";
+import {
+  NormalizedReport,
+  ProtocolContext,
+  SpamResult,
+  RootCauseResult,
+  IntendedBehaviorResult,
+  RootCauseVerdict,
+  neutralReport,
+} from "./schemas.ts";
 
 const PROMPTS_DIR = join(import.meta.dirname, "..", "prompts");
 const loadPrompt = (name: string) => readFileSync(join(PROMPTS_DIR, `${name}.md`), "utf8");
@@ -11,7 +19,7 @@ const loadPrompt = (name: string) => readFileSync(join(PROMPTS_DIR, `${name}.md`
 const CONCURRENCY = 4;
 
 export interface TriageOutcome {
-  stopped?: "NORMALIZE_FAILED" | "SPAM";
+  stopped?: "NORMALIZE_FAILED" | "SPAM" | "ROOT_CAUSE";
   reason?: string;
 }
 
@@ -70,5 +78,58 @@ export async function triage(store: RunStore, rawReport: string, repoPath: strin
   }
 
   store.logEvent({ stage: "gate:spam", status: "INFO", note: `passed (${spam.output?.verdict ?? spam.status})` });
+
+  // --- Root cause stage: Validator ‖ Intended Behavior → Judge (Gate 2) ---
+  const neutral = neutralReport(normalized.output);
+  const protocolCtx = protocol.output ?? null;
+
+  const [validator, intended] = await Promise.all([
+    pool(() =>
+      runAgent({
+        role: "root_cause_validator",
+        prompt: loadPrompt("root_cause_validator"),
+        repoPath,
+        context: { report: neutral, protocol: protocolCtx },
+        schema: RootCauseResult,
+      }),
+    ),
+    pool(() =>
+      runAgent({
+        role: "intended_behavior",
+        prompt: loadPrompt("intended_behavior"),
+        repoPath,
+        context: { report: neutral, protocol: protocolCtx },
+        schema: IntendedBehaviorResult,
+      }),
+    ),
+  ]);
+  store.saveResult("root_cause_validator", validator);
+  store.saveResult("intended_behavior", intended);
+
+  const judge = await runAgent({
+    role: "root_cause_judge",
+    prompt: loadPrompt("root_cause_judge"),
+    repoPath,
+    context: {
+      report: neutral,
+      validator: validator.output ?? null,
+      intended_behavior: intended.output ?? null,
+    },
+    schema: RootCauseVerdict,
+  });
+  store.saveResult("root_cause", judge);
+
+  // Gate 2 — only a confident INVALID stops. VALID and UNCERTAIN continue;
+  // an unavailable verdict (judge failed) continues rather than rejecting.
+  if (judge.status === "COMPLETED" && judge.output?.verdict === "INVALID") {
+    store.logEvent({ stage: "gate:root_cause", status: "INFO", note: `rejected: ${judge.output.reasoning}` });
+    return { stopped: "ROOT_CAUSE", reason: judge.output.reasoning };
+  }
+
+  store.logEvent({
+    stage: "gate:root_cause",
+    status: "INFO",
+    note: `passed (${judge.output?.verdict ?? judge.status})`,
+  });
   return {};
 }
